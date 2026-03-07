@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "title": "211",
+    "category": "action",
+    "movie": "https://pub-51539e9605ec40d596cf7f001ab2b473.r2.dev/211.mp4",
+    "poster": "https://pub-51539e9605ec40d596cf7f001ab2b473.r2.dev/211.png"
+  },
+  {
+    "id": 2,
+    "title": "Kpop Demon Hunters",
+    "category": "cartoon",
+    "poster": "https://pub-51539e9605ec40d596cf7f001ab2b473.r2.dev/kpop_demon_hunters.png",
+    "preview": "https://pub-51539e9605ec40d596cf7f001ab2b473.r2.dev/kpop_demon_hunters-1_sample.mp4",
+    "movie": "https://pub-51539e9605ec40d596cf7f001ab2b473.r2.dev/kpop_demon_hunters.mp4"
+  },
+  {
+    "id": 3,
+    "title": "header",
+    "category": "trending",
+    "poster": "None/classic-movie-bg1.jpg",
+    "preview": "None/kpop_demon_hunters-1_sample.mp4",
+    "movie": "None/kpop_demon_hunters-1_sample.mp4",
+    "is_banner": true
+  }
+]

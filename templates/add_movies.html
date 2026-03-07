@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Add Movie – Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{background:#0b0b0b;color:white;font-family:Arial,sans-serif;padding:20px;}
+h1{color:#e50914;text-align:center;}
+form{max-width:500px;margin:auto;background:#111;padding:20px;border-radius:10px;}
+label{display:block;margin-top:15px;margin-bottom:5px;}
+input,select,button{width:100%;padding:10px;border-radius:5px;border:none;font-size:16px;}
+button{background:#e50914;color:white;margin-top:20px;cursor:pointer;font-weight:bold;}
+button:hover{background:#b00710;}
+.msg{text-align:center;margin-top:15px;}
+</style>
+</head>
+<body>
+<h1>Add New Movie</h1>
+<form id="movieForm">
+<label>Movie Title</label>
+<input type="text" id="title">
+
+<label>Category</label>
+<select id="category">
+<option value="">Select category</option>
+<option value="action">Action</option>
+<option value="scifi">Sci-Fi</option>
+<option value="cartoon">Cartoon</option>
+<option value="Teen">Teen</option>
+<option value="Horror_Thriller">Horror / Thriller</option>
+<option value="inspirational">Inspirational</option>
+</select>
+
+<label>Poster Image</label>
+<input type="file" id="poster" accept="image/*">
+
+<label>Set as Banner?</label>
+<select id="isBanner">
+<option value="no">No</option>
+<option value="yes">Yes</option>
+</select>
+
+<label>Preview File (15s clip)</label>
+<input type="file" id="preview" accept="video/*">
+
+<label>Full Movie File</label>
+<input type="file" id="movie" accept="video/*">
+
+<button type="submit">Upload Movie</button>
+<div class="msg" id="msg"></div>
+</form>
+
+<script>
+const form = document.getElementById("movieForm");
+const msg = document.getElementById("msg");
+
+form.addEventListener("submit", async e=>{
+    e.preventDefault();
+    const title=document.getElementById("title").value;
+    const category=document.getElementById("category").value;
+    const poster=document.getElementById("poster").files[0];
+    const preview=document.getElementById("preview").files[0];
+    const movie=document.getElementById("movie").files[0];
+    const isBanner=document.getElementById("isBanner").value;
+
+    const formData=new FormData();
+    formData.append("is_banner",isBanner);
+    if(poster) formData.append("poster_file",poster);
+
+    if(isBanner==="yes"){
+        msg.innerText="Uploading banner…";
+    } else {
+        if(!title||!category||!poster||!preview||!movie){
+            msg.innerText="❌ Fill all fields for a movie";
+            return;
+        }
+        formData.append("title",title);
+        formData.append("category",category);
+        formData.append("preview_file",preview);
+        formData.append("movie_file",movie);
+        msg.innerText="Uploading movie…";
+    }
+
+    try{
+        const res=await fetch("/upload_movie",{method:"POST",body:formData});
+        const data=await res.json();
+        msg.innerText=data.status==="success"?data.message:"❌ "+data.message;
+        if(data.status==="success") form.reset();
+    } catch(err){
+        msg.innerText="❌ Upload failed: "+err.message;
+    }
+});
+</script>
+</body>
+</html>

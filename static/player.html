@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Movie Player</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<header class="navbar">
+  <div class="nav-left">Classic Movies Ug</div>
+  <div class="nav-right">
+    <a href="/">Home</a>
+    <a href="/#movie-groups">Movies</a>
+  </div>
+</header>
+<main class="player-container">
+  <h1 id="movieTitle">Loading...</h1>
+  <video id="moviePlayer" controls width="100%" poster="">
+    <source id="movieSource" src="" type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+  <!-- Download -->
+  <a id="downloadBtn" class="buy-link" download>⬇ Download Movie</a>
+  <!-- Paid Movies -->
+  <section class="paid-movies">
+    <h2>🎬 Paid Movies</h2>
+    <div id="paidMoviesList" class="movie-grid"></div>
+  </section>
+</main>
+<footer class="footer">© 2026 Classic Movies • Uganda</footer>
+<script>
+let currentMovie = null;
+
+function getMovieId() {
+  return new URLSearchParams(window.location.search).get("movie");
+}
+
+async function loadMovie() {
+  const movieId = getMovieId();
+  try {
+    const res = await fetch("/movies");
+    const movies = await res.json();
+    currentMovie = movies.find(m => String(m.id) === String(movieId));
+    if (!currentMovie) {
+      document.getElementById("movieTitle").textContent = "Movie not found";
+      return;
+    }
+    document.title = currentMovie.title + " | Classic Movies Ug";
+    document.getElementById("movieTitle").textContent = currentMovie.title;
+
+    const video = document.getElementById("moviePlayer");
+    const source = document.getElementById("movieSource");
+
+    // ✅ Secure movie route
+    source.src = `/secure_movie/${currentMovie.id}`;
+    video.poster = currentMovie.poster || "";
+    video.load();
+
+    // Download uses the secure route
+    const downloadBtn = document.getElementById("downloadBtn");
+    downloadBtn.href = `/secure_movie/${currentMovie.id}`;
+    downloadBtn.setAttribute("download", "");
+
+  } catch (e) {
+    console.error(e);
+    document.getElementById("movieTitle").textContent = "Error loading movie";
+  }
+}
+
+/* ===== PAID MOVIES ===== */
+async function loadPaidMovies() {
+  try {
+    const res = await fetch("/movies");
+    const movies = await res.json();
+    const container = document.getElementById("paidMoviesList");
+    container.innerHTML = "";
+    movies.forEach(movie => {
+      if (localStorage.getItem("movie_unlocked_" + movie.id) === "true") {
+        const card = document.createElement("div");
+        card.className = "movie-card";
+        card.innerHTML = `
+          <img src="${movie.poster}" alt="${movie.title}">
+          <p>${movie.title}</p>
+        `;
+        card.onclick = () => {
+          window.location.href = `/player?movie=${movie.id}`;
+        };
+        container.appendChild(card);
+      }
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+window.onload = async () => {
+  await loadMovie();
+  await loadPaidMovies();
+};
+</script>
+</body>
+</html>
