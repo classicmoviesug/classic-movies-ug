@@ -13,6 +13,7 @@ input,select,button{width:100%;padding:10px;border-radius:5px;border:none;font-s
 button{background:#e50914;color:white;margin-top:20px;cursor:pointer;font-weight:bold;}
 button:hover{background:#b00710;}
 .msg{text-align:center;margin-top:15px;}
+progress{width:100%;display:block;margin-top:10px;}
 </style>
 </head>
 <body>
@@ -47,6 +48,9 @@ button:hover{background:#b00710;}
 <label>Full Movie File</label>
 <input type="file" id="movie" accept="video/*">
 
+<progress id="progressBar" value="0" max="100"></progress>
+<span id="progressText"></span>
+
 <button type="submit">Upload Movie</button>
 <div class="msg" id="msg"></div>
 </form>
@@ -54,41 +58,84 @@ button:hover{background:#b00710;}
 <script>
 const form = document.getElementById("movieForm");
 const msg = document.getElementById("msg");
+const progressBar = document.getElementById("progressBar");
+const progressText = document.getElementById("progressText");
 
-form.addEventListener("submit", async e=>{
+async function uploadInChunks(file) {
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    let uploaded = 0;
+
+    for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+
+        const chunkForm = new FormData();
+        chunkForm.append("chunk", chunk);
+        chunkForm.append("filename", file.name);
+        chunkForm.append("chunkIndex", i);
+        chunkForm.append("totalChunks", totalChunks);
+
+        await fetch("/upload_movie_chunk", { method: "POST", body: chunkForm });
+
+        uploaded += chunk.size;
+        const percent = Math.floor((uploaded / file.size) * 100);
+        progressBar.value = percent;
+        progressText.innerText = percent + "%";
+    }
+}
+
+form.addEventListener("submit", async e => {
     e.preventDefault();
-    const title=document.getElementById("title").value;
-    const category=document.getElementById("category").value;
-    const poster=document.getElementById("poster").files[0];
-    const preview=document.getElementById("preview").files[0];
-    const movie=document.getElementById("movie").files[0];
-    const isBanner=document.getElementById("isBanner").value;
 
-    const formData=new FormData();
-    formData.append("is_banner",isBanner);
-    if(poster) formData.append("poster_file",poster);
+    const title = document.getElementById("title").value;
+    const category = document.getElementById("category").value;
+    const poster = document.getElementById("poster").files[0];
+    const preview = document.getElementById("preview").files[0];
+    const movie = document.getElementById("movie").files[0];
+    const isBanner = document.getElementById("isBanner").value;
 
-    if(isBanner==="yes"){
-        msg.innerText="Uploading banner…";
-    } else {
-        if(!title||!category||!poster||!preview||!movie){
-            msg.innerText="❌ Fill all fields for a movie";
-            return;
-        }
-        formData.append("title",title);
-        formData.append("category",category);
-        formData.append("preview_file",preview);
-        formData.append("movie_file",movie);
-        msg.innerText="Uploading movie…";
+    if (!poster || (isBanner === "no" && (!title || !category || !preview || !movie))) {
+        msg.innerText = "❌ Fill all required fields";
+        return;
     }
 
-    try{
-        const res=await fetch("/upload_movie",{method:"POST",body:formData});
-        const data=await res.json();
-        msg.innerText=data.status==="success"?data.message:"❌ "+data.message;
-        if(data.status==="success") form.reset();
-    } catch(err){
-        msg.innerText="❌ Upload failed: "+err.message;
+    msg.innerText = isBanner === "yes" ? "Uploading banner..." : "Uploading movie in chunks...";
+
+    try {
+        // Upload poster
+        const posterForm = new FormData();
+        posterForm.append("poster_file", poster);
+        posterForm.append("is_banner", isBanner);
+        await fetch("/upload_movie", { method: "POST", body: posterForm });
+
+        if (isBanner === "no") {
+            // Upload preview and movie in chunks
+            await uploadInChunks(preview);
+            await uploadInChunks(movie);
+
+            // Final form to save movie info
+            const finalForm = new FormData();
+            finalForm.append("title", title);
+            finalForm.append("category", category);
+            finalForm.append("poster_file", poster);
+            finalForm.append("preview_file", preview);
+            finalForm.append("movie_file", movie);
+            finalForm.append("is_banner", "no");
+
+            const finalRes = await fetch("/upload_movie", { method: "POST", body: finalForm });
+            const data = await finalRes.json();
+            msg.innerText = data.status === "success" ? "✅ " + data.message : "❌ " + data.message;
+        } else {
+            msg.innerText = "✅ Banner uploaded successfully";
+        }
+
+        form.reset();
+        progressBar.value = 0;
+        progressText.innerText = "";
+    } catch (err) {
+        msg.innerText = "❌ Upload failed: " + err.message;
     }
 });
 </script>
