@@ -1,12 +1,11 @@
-from flask import Flask, request, jsonify, send_from_directory, render_template, send_file
+from flask import Flask, request, jsonify, send_from_directory, render_template
 import os, json
 from werkzeug.utils import secure_filename
-import requests
 import boto3
 from dotenv import load_dotenv
+import tempfile
 
 load_dotenv()
-
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 # ---------------- FLUTTERWAVE ----------------
@@ -26,8 +25,6 @@ IMAGE_FOLDER = "static/images"
 os.makedirs(MOVIE_FOLDER, exist_ok=True)
 os.makedirs(IMAGE_FOLDER, exist_ok=True)
 
-MOVIES_JSON = "movies.json"
-BANNER_JSON = "banner.json"
 ALLOWED_MOVIE_EXT = {"mp4", "mov", "avi", "mkv"}
 ALLOWED_IMAGE_EXT = {"jpg", "jpeg", "png", "gif"}
 
@@ -41,6 +38,7 @@ s3 = boto3.client(
 )
 
 def upload_to_r2(local_path, filename, content_type):
+    """Upload a file to Cloudflare R2 and return the public URL"""
     s3.upload_file(
         local_path,
         R2_BUCKET,
@@ -54,14 +52,21 @@ def allowed_file(filename, allowed):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed
 
 def load_movies():
-    if os.path.exists(MOVIES_JSON):
-        with open(MOVIES_JSON, "r") as f:
-            return json.load(f)
-    return []
+    """Load movies.json from R2"""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            s3.download_file(R2_BUCKET, "movies.json", tmp.name)
+            with open(tmp.name, "r") as f:
+                return json.load(f)
+    except:
+        return []
 
-def save_movies(data):
-    with open(MOVIES_JSON, "w") as f:
-        json.dump(data, f, indent=2)
+def save_movies(movies):
+    """Save movies.json to R2"""
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        with open(tmp.name, "w") as f:
+            json.dump(movies, f, indent=2)
+        s3.upload_file(tmp.name, R2_BUCKET, "movies.json", ExtraArgs={"ContentType": "application/json"})
 
 # ---------------- ROUTES ----------------
 @app.route("/secure_movie/<int:movie_id>")
@@ -74,11 +79,7 @@ def secure_movie(movie_id):
     if not movie:
         return "Movie not found", 404
 
-    local_path = os.path.join(MOVIE_FOLDER, os.path.basename(movie["movie"]))
-    if not os.path.exists(local_path):
-        return "Movie file missing", 404
-
-    return send_file(local_path, as_attachment=False)
+    return jsonify({"movie_url": movie["movie"]})  # Serve direct Cloudflare URL
 
 @app.route("/")
 def index():
@@ -88,6 +89,7 @@ def index():
 def add_movie_page():
     return render_template("add_movies.html")
 
+# ---------------- UPLOAD ----------------
 @app.route("/upload_movie", methods=["POST"])
 def upload_movie():
     is_banner = request.form.get("is_banner") == "yes"
@@ -101,8 +103,12 @@ def upload_movie():
     poster_url = upload_to_r2(poster_path, poster_name, poster.content_type)
 
     if is_banner:
-        with open(BANNER_JSON, "w") as f:
-            json.dump({"banner": poster_url}, f, indent=2)
+        # Just save banner
+        banner_data = {"banner": poster_url}
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            with open(tmp.name, "w") as f:
+                json.dump(banner_data, f, indent=2)
+            s3.upload_file(tmp.name, R2_BUCKET, "banner.json", ExtraArgs={"ContentType": "application/json"})
         return jsonify({"status": "success", "message": "Banner uploaded", "url": poster_url})
 
     # Movie upload
@@ -114,9 +120,11 @@ def upload_movie():
     if not all([title, category, preview, movie]):
         return jsonify({"status": "error", "message": "Missing movie fields"}), 400
 
+    # Validate extensions
     if not allowed_file(preview.filename, ALLOWED_MOVIE_EXT) or not allowed_file(movie.filename, ALLOWED_MOVIE_EXT):
         return jsonify({"status": "error", "message": "Invalid video format"}), 400
 
+    # Save locally
     preview_name = secure_filename(preview.filename)
     movie_name = secure_filename(movie.filename)
     preview_path = os.path.join(MOVIE_FOLDER, preview_name)
@@ -124,6 +132,7 @@ def upload_movie():
     preview.save(preview_path)
     movie.save(movie_path)
 
+    # Upload to Cloudflare
     preview_url = upload_to_r2(preview_path, preview_name, preview.content_type)
     movie_url = upload_to_r2(movie_path, movie_name, movie.content_type)
 
@@ -142,11 +151,11 @@ def upload_movie():
 
 # ---------------- API ----------------
 @app.route("/movies")
-def movies():
+def movies_api():
     return jsonify(load_movies())
 
 @app.route("/player_preview")
-def preview():
+def preview_player():
     return send_from_directory("static", "player_preview.html")
 
 @app.route("/player")
@@ -156,6 +165,7 @@ def player():
 # ---------------- PAYMENTS ----------------
 @app.route("/pay", methods=["POST"])
 def pay():
+    import requests
     data = request.get_json(force=True)
     phone = data.get("phone")
     amount = data.get("amount")
@@ -166,7 +176,7 @@ def pay():
         "amount": amount,
         "currency": "UGX",
         "payment_options": "mobilemoneyuganda",
-        "redirect_url": os.getenv("PAYMENT_CALLBACK_URL", "http://localhost:5001/payment_callback"),
+        "redirect_url": "https://classic-movies-ug-4.onrender.com/payment_callback",
         "customer": {"phonenumber": phone, "email": "customer@example.com", "name": "Movie Customer"},
         "customizations": {"title": "Classic Movies UG", "description": "Movie purchase"}
     }
@@ -181,6 +191,6 @@ def payment_callback():
 def static_files(path):
     return send_from_directory("static", path)
 
-# ---------------- RUN FOR LOCAL TESTING ONLY ----------------
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5001)  # local dev only; Render uses gunicorn
+    # Render needs host="0.0.0.0"
+    app.run(debug=True, port=int(os.environ.get("PORT", 5000)), host="0.0.0.0")
