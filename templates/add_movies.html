@@ -13,7 +13,6 @@ input,select,button{width:100%;padding:10px;border-radius:5px;border:none;font-s
 button{background:#e50914;color:white;margin-top:20px;cursor:pointer;font-weight:bold;}
 button:hover{background:#b00710;}
 .msg{text-align:center;margin-top:15px;}
-progress{width:100%; display:block; margin-top:10px;}
 </style>
 </head>
 <body>
@@ -48,48 +47,14 @@ progress{width:100%; display:block; margin-top:10px;}
 <label>Full Movie File</label>
 <input type="file" id="movie" accept="video/*">
 
-<progress id="progressBar" value="0" max="100"></progress>
-<span id="progressText"></span>
-
 <button type="submit">Upload Movie</button>
 <div class="msg" id="msg"></div>
 </form>
 
 <script>
-// ---------------- CONFIG ----------------
-const R2_PUBLIC_URL = "YOUR_PUBLIC_BUCKET_URL_HERE"; // Replace with your Cloudflare R2 public bucket URL
-
 const form = document.getElementById("movieForm");
 const msg = document.getElementById("msg");
-const progressBar = document.getElementById("progressBar");
-const progressText = document.getElementById("progressText");
 
-// ---------------- UPLOAD TO R2 ----------------
-async function uploadFile(file, folder){
-    return new Promise((resolve,reject)=>{
-        const xhr = new XMLHttpRequest();
-        const url = `${R2_PUBLIC_URL}/${folder}/${file.name}`;
-        xhr.open("PUT", url);
-
-        xhr.upload.onprogress = e=>{
-            if(e.lengthComputable){
-                const percent = Math.floor((e.loaded / e.total) * 100);
-                progressBar.value = percent;
-                progressText.innerText = percent+"%";
-            }
-        };
-
-        xhr.onload = ()=>{
-            if(xhr.status >= 200 && xhr.status < 300) resolve(url);
-            else reject(new Error("Upload failed"));
-        };
-
-        xhr.onerror = ()=>reject(new Error("Network error"));
-        xhr.send(file);
-    });
-}
-
-// ---------------- FORM SUBMIT ----------------
 form.addEventListener("submit", async e=>{
     e.preventDefault();
     const title=document.getElementById("title").value;
@@ -99,40 +64,30 @@ form.addEventListener("submit", async e=>{
     const movie=document.getElementById("movie").files[0];
     const isBanner=document.getElementById("isBanner").value;
 
-    if(isBanner==="no" && (!title||!category||!poster||!preview||!movie)){
-        msg.innerText="❌ Fill all fields for a movie";
-        return;
+    const formData=new FormData();
+    formData.append("is_banner",isBanner);
+    if(poster) formData.append("poster_file",poster);
+
+    if(isBanner==="yes"){
+        msg.innerText="Uploading banner…";
+    } else {
+        if(!title||!category||!poster||!preview||!movie){
+            msg.innerText="❌ Fill all fields for a movie";
+            return;
+        }
+        formData.append("title",title);
+        formData.append("category",category);
+        formData.append("preview_file",preview);
+        formData.append("movie_file",movie);
+        msg.innerText="Uploading movie…";
     }
 
-    msg.innerText=isBanner==="yes" ? "Uploading banner..." : "Uploading movie files...";
-    progressBar.value=0;
-    progressText.innerText="0%";
-
     try{
-        // Upload files to R2
-        const posterURL = poster ? await uploadFile(poster,"posters") : "";
-        const previewURL = preview ? await uploadFile(preview,"previews") : "";
-        const movieURL = movie ? await uploadFile(movie,"movies") : "";
-
-        // Send metadata to Render
-        const res = await fetch("/upload_movie",{
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({
-                title,
-                category,
-                poster: posterURL,
-                preview: previewURL,
-                movie: movieURL,
-                is_banner: isBanner
-            })
-        });
-        const data = await res.json();
-        msg.innerText = data.status==="success" ? "✅ Movie info saved!" : "❌ "+data.message;
-        form.reset();
-        progressBar.value=0;
-        progressText.innerText="";
-    }catch(err){
+        const res=await fetch("/upload_movie",{method:"POST",body:formData});
+        const data=await res.json();
+        msg.innerText=data.status==="success"?data.message:"❌ "+data.message;
+        if(data.status==="success") form.reset();
+    } catch(err){
         msg.innerText="❌ Upload failed: "+err.message;
     }
 });
