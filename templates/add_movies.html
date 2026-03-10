@@ -21,7 +21,6 @@ progress{width:100%; display:block; margin-top:10px;}
 <form id="movieForm">
 <label>Movie Title</label>
 <input type="text" id="title">
-
 <label>Category</label>
 <select id="category">
 <option value="">Select category</option>
@@ -32,36 +31,60 @@ progress{width:100%; display:block; margin-top:10px;}
 <option value="Horror_Thriller">Horror / Thriller</option>
 <option value="inspirational">Inspirational</option>
 </select>
-
 <label>Poster Image</label>
 <input type="file" id="poster" accept="image/*">
-
 <label>Set as Banner?</label>
 <select id="isBanner">
 <option value="no">No</option>
 <option value="yes">Yes</option>
 </select>
-
 <label>Preview File (15s clip)</label>
 <input type="file" id="preview" accept="video/*">
-
 <label>Full Movie File</label>
 <input type="file" id="movie" accept="video/*">
-
 <progress id="progressBar" value="0" max="100"></progress>
 <span id="progressText"></span>
-
 <button type="submit">Upload Movie</button>
 <div class="msg" id="msg"></div>
 </form>
 
 <script>
+const R2_PUBLIC_URL = "https://pub-51539e9605ec40d596cf7f001ab2b473.r2.dev"; // <-- Paste your public R2 URL here
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks
 const form = document.getElementById("movieForm");
 const msg = document.getElementById("msg");
 const progressBar = document.getElementById("progressBar");
 const progressText = document.getElementById("progressText");
 
-form.addEventListener("submit", async e => {
+// Upload a file to R2 in chunks
+async function uploadFile(file, folder){
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    let uploaded = 0;
+
+    for(let i=0;i<totalChunks;i++){
+        const start = i*CHUNK_SIZE;
+        const end = Math.min(file.size, start+CHUNK_SIZE);
+        const chunk = file.slice(start,end);
+
+        const formData = new FormData();
+        formData.append("file", chunk, file.name);
+
+        // We do a PUT to R2 public bucket with the file name
+        await fetch(`${R2_PUBLIC_URL}/${folder}/${file.name}`, {
+            method: "PUT",
+            body: chunk
+        });
+
+        uploaded += chunk.size;
+        const percent = Math.floor((uploaded / file.size)*100);
+        progressBar.value = percent;
+        progressText.innerText = percent + "%";
+    }
+
+    return `${R2_PUBLIC_URL}/${folder}/${file.name}`;
+}
+
+form.addEventListener("submit", async e=>{
     e.preventDefault();
     const title = document.getElementById("title").value;
     const category = document.getElementById("category").value;
@@ -70,59 +93,40 @@ form.addEventListener("submit", async e => {
     const movie = document.getElementById("movie").files[0];
     const isBanner = document.getElementById("isBanner").value;
 
-    if(isBanner === "no" && (!title || !category || !poster || !preview || !movie)){
-        msg.innerText = "❌ Fill all fields for a movie";
+    if(isBanner==="no" && (!title||!category||!poster||!preview||!movie)){
+        msg.innerText="❌ Fill all fields for a movie";
         return;
     }
 
-    msg.innerText = isBanner==="yes" ? "Uploading banner..." : "Uploading movie...";
-    progressBar.value = 0;
-    progressText.innerText = "0%";
+    try{
+        msg.innerText = isBanner==="yes" ? "Uploading banner..." : "Uploading movie files...";
+        progressBar.value = 0;
+        progressText.innerText = "0%";
 
-    const formData = new FormData();
-    formData.append("is_banner", isBanner);
-    if(poster) formData.append("poster_file", poster);
-    if(preview) formData.append("preview_file", preview);
-    if(movie) formData.append("movie_file", movie);
-    if(title) formData.append("title", title);
-    if(category) formData.append("category", category);
+        const posterURL = poster ? await uploadFile(poster,"posters") : "";
+        const previewURL = preview ? await uploadFile(preview,"previews") : "";
+        const movieURL = movie ? await uploadFile(movie,"movies") : "";
 
-    try {
-        // Use XMLHttpRequest for large files to fix network error
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/upload_movie", true);
-
-        xhr.upload.onprogress = e => {
-            if(e.lengthComputable){
-                const percent = Math.floor((e.loaded / e.total) * 100);
-                progressBar.value = percent;
-                progressText.innerText = percent + "%";
-            }
-        };
-
-        xhr.onload = () => {
-            if(xhr.status >= 200 && xhr.status < 300){
-                try{
-                    const data = JSON.parse(xhr.responseText);
-                    msg.innerText = data.status==="success" ? data.message : "❌ " + data.message;
-                    if(data.status==="success") form.reset();
-                    progressBar.value = 0;
-                    progressText.innerText = "";
-                } catch(err){
-                    msg.innerText = "❌ Upload failed: Invalid response";
-                }
-            } else {
-                msg.innerText = "❌ Upload failed: " + xhr.statusText;
-            }
-        };
-
-        xhr.onerror = () => {
-            msg.innerText = "❌ Upload failed: Network error";
-        };
-
-        xhr.send(formData);
-    } catch(err){
-        msg.innerText = "❌ Upload failed: " + err.message;
+        // Send metadata to Flask
+        const res = await fetch("/save-movie",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({
+                title,
+                category,
+                poster: posterURL,
+                preview: previewURL,
+                movie: movieURL,
+                is_banner: isBanner
+            })
+        });
+        const data = await res.json();
+        msg.innerText = data.status==="success" ? "✅ Movie info saved!" : "❌ "+data.message;
+        form.reset();
+        progressBar.value = 0;
+        progressText.innerText = "";
+    }catch(err){
+        msg.innerText="❌ Upload failed: "+err.message;
     }
 });
 </script>
