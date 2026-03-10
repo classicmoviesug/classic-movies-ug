@@ -2,9 +2,10 @@ from flask import Flask, request, jsonify, send_from_directory, render_template
 import os, json
 from werkzeug.utils import secure_filename
 import boto3
+import requests
 from dotenv import load_dotenv
-load_dotenv()
 
+load_dotenv()
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 # ---------------- FLUTTERWAVE ----------------
@@ -43,6 +44,7 @@ def allowed_file(filename, allowed):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed
 
 def upload_to_r2(local_path, filename, content_type):
+    # Upload large files safely
     s3.upload_file(
         local_path,
         R2_BUCKET,
@@ -96,7 +98,6 @@ def upload_movie():
     poster = request.files.get("poster_file")
     if not poster or not allowed_file(poster.filename, ALLOWED_IMAGE_EXT):
         return jsonify({"status": "error", "message": "Poster image required"}), 400
-
     poster_name = secure_filename(poster.filename)
     poster_path = os.path.join(IMAGE_FOLDER, poster_name)
     poster.save(poster_path)
@@ -113,24 +114,25 @@ def upload_movie():
 
     title = request.form.get("title")
     category = request.form.get("category")
-    preview = request.files.get("preview_file")
-    movie = request.files.get("movie_file")
+    preview_file = request.files.get("preview_file")
+    movie_file = request.files.get("movie_file")
 
-    if not all([title, category, preview, movie]):
+    if not all([title, category, preview_file, movie_file]):
         return jsonify({"status": "error", "message": "Missing movie fields"}), 400
-
-    if not allowed_file(preview.filename, ALLOWED_MOVIE_EXT) or not allowed_file(movie.filename, ALLOWED_MOVIE_EXT):
+    if not allowed_file(preview_file.filename, ALLOWED_MOVIE_EXT) or not allowed_file(movie_file.filename, ALLOWED_MOVIE_EXT):
         return jsonify({"status": "error", "message": "Invalid video format"}), 400
 
-    preview_name = secure_filename(preview.filename)
-    movie_name = secure_filename(movie.filename)
+    # Save preview and movie locally
+    preview_name = secure_filename(preview_file.filename)
+    movie_name = secure_filename(movie_file.filename)
     preview_path = os.path.join(MOVIE_FOLDER, preview_name)
     movie_path = os.path.join(MOVIE_FOLDER, movie_name)
-    preview.save(preview_path)
-    movie.save(movie_path)
+    preview_file.save(preview_path)
+    movie_file.save(movie_path)
 
-    preview_url = upload_to_r2(preview_path, preview_name, preview.content_type)
-    movie_url = upload_to_r2(movie_path, movie_name, movie.content_type)
+    # Upload to Cloudflare
+    preview_url = upload_to_r2(preview_path, preview_name, preview_file.content_type)
+    movie_url = upload_to_r2(movie_path, movie_name, movie_file.content_type)
 
     movies = load_movies()
     new_id = max([m["id"] for m in movies], default=0) + 1
@@ -143,6 +145,7 @@ def upload_movie():
         "movie": movie_url
     })
     save_movies(movies)
+
     return jsonify({"status": "success", "message": "Movie uploaded successfully"})
 
 # ---------------- PAYMENTS ----------------
@@ -153,7 +156,6 @@ def pay():
     amount = data.get("amount")
     movie_id = data.get("movie_id")
     tx_ref = f"movie_{movie_id}_{phone}"
-
     payload = {
         "tx_ref": tx_ref,
         "amount": amount,
