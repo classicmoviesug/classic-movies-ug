@@ -108,7 +108,7 @@ form.addEventListener("submit", async e=>{
         const movieURL = movie ? await uploadFile(movie,"movies") : "";
 
         // Send metadata to Flask
-        const res = await fetch("/save-movie",{
+        const res = await fetch("/upload_movie",{
             method:"POST",
             headers:{"Content-Type":"application/json"},
             body: JSON.stringify({
@@ -132,3 +132,4 @@ form.addEventListener("submit", async e=>{
 </script>
 </body>
 </html>
+
