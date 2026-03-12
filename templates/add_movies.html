@@ -49,14 +49,47 @@ progress{width:100%; display:block; margin-top:10px;}
 </form>
 
 <script>
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks
 const form = document.getElementById("movieForm");
 const msg = document.getElementById("msg");
 const progressBar = document.getElementById("progressBar");
 const progressText = document.getElementById("progressText");
 
+async function uploadFile(file, folder){
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    let uploaded = 0;
+
+    const presignRes = await fetch("/get_presigned_url", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({filename: file.name, content_type: file.type, folder})
+    });
+    const presignData = await presignRes.json();
+    const uploadUrl = presignData.upload_url;
+    const publicUrl = presignData.public_url;
+
+    for(let i=0;i<totalChunks;i++){
+        const start = i*CHUNK_SIZE;
+        const end = Math.min(file.size, start+CHUNK_SIZE);
+        const chunk = file.slice(start,end);
+
+        await fetch(uploadUrl, {
+            method: "PUT",
+            body: chunk,
+            headers: {"Content-Range":`bytes ${start}-${end-1}/${file.size}`,"Content-Type":file.type}
+        });
+
+        uploaded += chunk.size;
+        const percent = Math.floor((uploaded / file.size)*100);
+        progressBar.value = percent;
+        progressText.innerText = percent + "%";
+    }
+
+    return publicUrl;
+}
+
 form.addEventListener("submit", async e=>{
     e.preventDefault();
-
     const title = document.getElementById("title").value;
     const category = document.getElementById("category").value;
     const poster = document.getElementById("poster").files[0];
@@ -64,45 +97,41 @@ form.addEventListener("submit", async e=>{
     const movie = document.getElementById("movie").files[0];
     const isBanner = document.getElementById("isBanner").value;
 
-    const formData = new FormData();
-
-    formData.append("title", title);
-    formData.append("category", category);
-    formData.append("poster_file", poster);
-    formData.append("preview_file", preview);
-    formData.append("movie_file", movie);
-    formData.append("is_banner", isBanner);
+    if(isBanner==="no" && (!title||!category||!poster||!preview||!movie)){
+        msg.innerText="❌ Fill all fields for a movie";
+        return;
+    }
 
     try{
+        msg.innerText = isBanner==="yes" ? "Uploading banner..." : "Uploading movie files...";
+        progressBar.value = 0;
+        progressText.innerText = "0%";
 
-        msg.innerText = "Uploading...";
-        progressBar.value = 20;
+        const posterURL = poster ? await uploadFile(poster,"posters") : "";
+        const previewURL = preview ? await uploadFile(preview,"previews") : "";
+        const movieURL = movie ? await uploadFile(movie,"movies") : "";
 
-        const res = await fetch("/upload_movie",{
+        const res = await fetch("/save-movie",{
             method:"POST",
-            body:formData
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({
+                title,
+                category,
+                poster: posterURL,
+                preview: previewURL,
+                movie: movieURL,
+                is_banner: isBanner
+            })
         });
-
-        progressBar.value = 80;
-
         const data = await res.json();
-
-        progressBar.value = 100;
-
-        if(data.status==="success"){
-            msg.innerText="✅ Upload successful!";
-        }else{
-            msg.innerText="❌ "+data.message;
-        }
-
+        msg.innerText = data.status==="success" ? "✅ Movie info saved!" : "❌ "+data.message;
+        form.reset();
+        progressBar.value = 0;
+        progressText.innerText = "";
     }catch(err){
         msg.innerText="❌ Upload failed: "+err.message;
     }
 });
 </script>
-
 </body>
 </html>
-
-
-
