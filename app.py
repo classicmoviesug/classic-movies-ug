@@ -90,6 +90,26 @@ def preview():
 @app.route("/player")
 def player():
     return send_from_directory("static","player.html")
+    @app.route("/save-movie", methods=["POST"])
+def save_movie():
+    data = request.get_json()
+    movies = load_movies()
+
+    new_id = max([m["id"] for m in movies], default=0) + 1
+
+    movies.append({
+        "id": new_id,
+        "title": data.get("title"),
+        "category": data.get("category"),
+        "poster": data.get("poster"),
+        "preview": data.get("preview"),
+        "movie": data.get("movie")
+    })
+
+    save_movies(movies)
+
+    return jsonify({"status":"success"})
+
 
 # ---------------- UPLOAD MOVIE / BANNER ----------------
 @app.route("/upload_movie", methods=["POST"])
@@ -179,3 +199,4 @@ def static_files(path):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
     app.run(host="0.0.0.0", port=port)
+
