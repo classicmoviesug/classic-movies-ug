@@ -49,43 +49,14 @@ progress{width:100%; display:block; margin-top:10px;}
 </form>
 
 <script>
-const R2_PUBLIC_URL = "https://pub-51539e9605ec40d596cf7f001ab2b473.r2.dev"; // <-- Paste your public R2 URL here
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks
 const form = document.getElementById("movieForm");
 const msg = document.getElementById("msg");
 const progressBar = document.getElementById("progressBar");
 const progressText = document.getElementById("progressText");
 
-// Upload a file to R2 in chunks
-async function uploadFile(file, folder){
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-    let uploaded = 0;
-
-    for(let i=0;i<totalChunks;i++){
-        const start = i*CHUNK_SIZE;
-        const end = Math.min(file.size, start+CHUNK_SIZE);
-        const chunk = file.slice(start,end);
-
-        const formData = new FormData();
-        formData.append("file", chunk, file.name);
-
-        // We do a PUT to R2 public bucket with the file name
-        await fetch(`${R2_PUBLIC_URL}/${folder}/${file.name}`, {
-            method: "PUT",
-            body: chunk
-        });
-
-        uploaded += chunk.size;
-        const percent = Math.floor((uploaded / file.size)*100);
-        progressBar.value = percent;
-        progressText.innerText = percent + "%";
-    }
-
-    return `${R2_PUBLIC_URL}/${folder}/${file.name}`;
-}
-
 form.addEventListener("submit", async e=>{
     e.preventDefault();
+
     const title = document.getElementById("title").value;
     const category = document.getElementById("category").value;
     const poster = document.getElementById("poster").files[0];
@@ -93,44 +64,45 @@ form.addEventListener("submit", async e=>{
     const movie = document.getElementById("movie").files[0];
     const isBanner = document.getElementById("isBanner").value;
 
-    if(isBanner==="no" && (!title||!category||!poster||!preview||!movie)){
-        msg.innerText="❌ Fill all fields for a movie";
-        return;
-    }
+    const formData = new FormData();
+
+    formData.append("title", title);
+    formData.append("category", category);
+    formData.append("poster_file", poster);
+    formData.append("preview_file", preview);
+    formData.append("movie_file", movie);
+    formData.append("is_banner", isBanner);
 
     try{
-        msg.innerText = isBanner==="yes" ? "Uploading banner..." : "Uploading movie files...";
-        progressBar.value = 0;
-        progressText.innerText = "0%";
 
-        const posterURL = poster ? await uploadFile(poster,"posters") : "";
-        const previewURL = preview ? await uploadFile(preview,"previews") : "";
-        const movieURL = movie ? await uploadFile(movie,"movies") : "";
+        msg.innerText = "Uploading...";
+        progressBar.value = 20;
 
-        // Send metadata to Flask
-        const res = await fetch("/save-movie",{
+        const res = await fetch("/upload_movie",{
             method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({
-                title,
-                category,
-                poster: posterURL,
-                preview: previewURL,
-                movie: movieURL,
-                is_banner: isBanner
-            })
+            body:formData
         });
+
+        progressBar.value = 80;
+
         const data = await res.json();
-        msg.innerText = data.status==="success" ? "✅ Movie info saved!" : "❌ "+data.message;
-        form.reset();
-        progressBar.value = 0;
-        progressText.innerText = "";
+
+        progressBar.value = 100;
+
+        if(data.status==="success"){
+            msg.innerText="✅ Upload successful!";
+        }else{
+            msg.innerText="❌ "+data.message;
+        }
+
     }catch(err){
         msg.innerText="❌ Upload failed: "+err.message;
     }
 });
 </script>
+
 </body>
 </html>
+
 
 
